@@ -1,92 +1,109 @@
 "use client";
-import { useEffect, useState } from "react";
-import { LayoutDashboard, Bot, Users, Search, Megaphone, Inbox, Flame, Mail, BarChart3, Workflow, Plug, KeyRound, ShieldBan, ScrollText, Settings, Sparkles, Send, Radar, CheckCircle2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { LayoutDashboard, Bot, Users, Megaphone, Inbox, Mail, BarChart3, Workflow, Plug, KeyRound, ShieldBan, ScrollText, Settings, Sparkles, Send, Radar, CheckCircle2, Upload, Play, Pause, Eye, Bell, FlaskConical } from "lucide-react";
+
+type Lead = { id:string; fullName:string; email:string; company?:string; location?:string; status:string; outreachAllowed:boolean };
+type Campaign = { id:string; name:string; status:string; dailyLimit:number; dryRun:boolean; sent:number; replies:number; _count:{leads:number;messages:number}; steps:{step:number;delayHours:number;subjectTemplate?:string}[] };
+type InboxItem = { id:string; fromAddress:string; subject:string; textBody?:string; intent?:string; receivedAt?:string; lead?:{fullName:string;email:string;company?:string}; campaign?:{name:string} };
+type Stats = { leads:number;contacted:number;replies:number;interested:number;activeCampaigns:number;suppressed:number;queued:number };
 
 const nav = [
-  ["Workspace",[[LayoutDashboard,"Overview",true],[Bot,"AI Agent"]]],
-  ["Research",[[Users,"Leads"],[Search,"Research"]]],
-  ["Outreach",[[Megaphone,"Campaigns"],[Inbox,"Inbox"],[Flame,"Hot Leads"],[Mail,"Mailboxes"]]],
+  ["Workspace",[[LayoutDashboard,"Overview"],[Bot,"AI Agent"]]],
+  ["Contacts",[[Users,"Leads"]]],
+  ["Outreach",[[Megaphone,"Campaigns"],[Inbox,"Inbox"],[Mail,"Mailboxes"]]],
   ["System",[[BarChart3,"Analytics"],[Workflow,"Automations"],[Plug,"Integrations"],[KeyRound,"API & MCP"],[ShieldBan,"Suppression"],[ScrollText,"Audit Logs"],[Settings,"Settings"]]]
 ] as const;
 
-const leads = [
-  { initials:"SJ",name:"Sarah Johnson",company:"eXp Realty",location:"Miami, FL",score:92,status:"Interested",class:"hot" },
-  { initials:"MC",name:"Michael Chen",company:"Real Broker",location:"Austin, TX",score:87,status:"Contacted",class:"" },
-  { initials:"EP",name:"Emily Parker",company:"Compass",location:"Tampa, FL",score:84,status:"Replied",class:"reply" },
-  { initials:"DR",name:"Daniel Rivera",company:"eXp Realty",location:"Orlando, FL",score:81,status:"Qualified",class:"" }
-];
+const emptyStats:Stats={leads:0,contacted:0,replies:0,interested:0,activeCampaigns:0,suppressed:0,queued:0};
+const initialCampaign={name:"Email Signature Outreach",goal:"Introduce professional HTML email signature services",audience:"Past clients and opted-in business leads",dailyLimit:10,initialSubject:"A quick email signature idea for {{company}}",initialText:"Hi {{firstName}},\n\nI noticed an opportunity to make your business email signature look more professional and consistent across Gmail, Outlook and mobile devices. Would you like me to share a few suitable examples?\n\nBest,\nShaon Rahman",follow1Subject:"Re: A quick email signature idea for {{company}}",follow1Text:"Hi {{firstName}},\n\nJust following up in case my earlier email was missed. I would be happy to share a relevant example for {{company}}.",follow2Subject:"One last follow-up",follow2Text:"Hi {{firstName}},\n\nThis is my final follow-up. If improving your email signature becomes a priority later, feel free to reach out anytime."};
 
 export default function Dashboard(){
   const [active,setActive]=useState("Overview");
-  const [command,setCommand]=useState("Find 50 high-fit real estate agents in Florida and prepare a personalized campaign");
-  const [settings,setSettings]=useState<Record<string,string>>({OPENAI_MODEL:"gpt-5.6"});
+  const [stats,setStats]=useState<Stats>(emptyStats);
+  const [leads,setLeads]=useState<Lead[]>([]);
+  const [campaigns,setCampaigns]=useState<Campaign[]>([]);
+  const [inbox,setInbox]=useState<InboxItem[]>([]);
+  const [notice,setNotice]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [preview,setPreview]=useState<any>(null);
+  const [campaignForm,setCampaignForm]=useState(initialCampaign);
+  const [csv,setCsv]=useState("");
+  const [permissionSource,setPermissionSource]=useState("Existing customers / opted-in contacts");
+  const [permissionConfirmed,setPermissionConfirmed]=useState(false);
+  const [importCampaignId,setImportCampaignId]=useState("");
+  const [command,setCommand]=useState("Prepare a compliant email-signature outreach plan for my eligible contacts");
+  const [commandResult,setCommandResult]=useState("Ready");
+  const [settings,setSettings]=useState<Record<string,string>>({OPENAI_MODEL:"gpt-5.6",HOSTINGER_FROM_ADDRESS:"hello@shaonrahman.com"});
   const [settingStatus,setSettingStatus]=useState<Record<string,{configured:boolean;source:string;value?:string}>>({});
   const [saveState,setSaveState]=useState("Ready");
-  useEffect(()=>{ if(active==="Settings" || active==="Integrations") loadSettings(); },[active]);
-  async function loadSettings(){
-    try{const r=await fetch('/api/settings');const j=await r.json();setSettingStatus(j.settings||{});if(j.settings?.OPENAI_MODEL?.value)setSettings(v=>({...v,OPENAI_MODEL:j.settings.OPENAI_MODEL.value}));}catch{}
-  }
-  function updateSetting(key:string,value:string){setSettings(v=>({...v,[key]:value}));}
-  async function saveSettings(){
-    setSaveState("Saving…");
+
+  const loadCore=useCallback(async()=>{
     try{
-      const values=Object.fromEntries(Object.entries(settings).filter(([,v])=>v!==""));
-      const r=await fetch('/api/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({values})});
-      if(!r.ok) throw new Error('Save failed');
-      const j=await r.json();setSettingStatus(j.settings||{});
-      setSettings({OPENAI_MODEL:j.settings?.OPENAI_MODEL?.value||"gpt-5.6"});setSaveState("Saved locally & encrypted");
-    }catch{setSaveState("Could not save settings");}
+      const [s,l,c,i]=await Promise.all([fetch("/api/stats").then(r=>r.json()),fetch("/api/leads?pageSize=100").then(r=>r.json()),fetch("/api/campaigns").then(r=>r.json()),fetch("/api/inbox").then(r=>r.json())]);
+      setStats(s);setLeads(l.data||[]);setCampaigns(c.data||[]);setInbox(i.data||[]);
+    }catch{setNotice("Database is not ready. Start PostgreSQL and run Prisma migrations.");}
+  },[]);
+  useEffect(()=>{void loadCore();},[loadCore]);
+  useEffect(()=>{if(active==="Settings"||active==="Integrations")void loadSettings();},[active]);
+
+  async function loadSettings(){try{const j=await fetch("/api/settings").then(r=>r.json());setSettingStatus(j.settings||{});setSettings(v=>({...v,OPENAI_MODEL:j.settings?.OPENAI_MODEL?.value||v.OPENAI_MODEL}));}catch{}}
+  function updateSetting(key:string,value:string){setSettings(v=>({...v,[key]:value}));}
+  async function saveSettings(){setSaveState("Saving…");try{const values=Object.fromEntries(Object.entries(settings).filter(([,v])=>v!==""));const r=await fetch("/api/settings",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({values})});if(!r.ok)throw new Error();const j=await r.json();setSettingStatus(j.settings||{});setSettings({OPENAI_MODEL:j.settings?.OPENAI_MODEL?.value||"gpt-5.6",HOSTINGER_FROM_ADDRESS:""});setSaveState("Saved locally & encrypted");}catch{setSaveState("Could not save settings");}}
+  async function clearSetting(key:string){const j=await fetch("/api/settings",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({values:{[key]:"__CLEAR__"}})}).then(r=>r.json());setSettingStatus(j.settings||{});setSettings(v=>({...v,[key]:key==="OPENAI_MODEL"?"gpt-5.6":""}));}
+  async function testTelegram(){setSaveState("Sending test…");const r=await fetch("/api/telegram/test",{method:"POST"});setSaveState(r.ok?"Telegram test delivered":"Telegram test failed");}
+
+  async function importCsv(){
+    if(!permissionConfirmed){setNotice("Confirm that these contacts are permitted to receive this outreach.");return;}
+    setLoading(true);setNotice("Importing contacts…");
+    const r=await fetch("/api/leads",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({csv,permissionConfirmed:true,permissionSource,campaignId:importCampaignId||undefined})});
+    const j=await r.json();setLoading(false);setNotice(r.ok?`Imported ${j.imported}; existing ${j.existing}; invalid ${j.invalid?.length||0}.`:j.error||"Import failed");if(r.ok){setCsv("");void loadCore();}
   }
-  async function clearSetting(key:string){
-    setSaveState("Updating…");
-    const r=await fetch('/api/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({values:{[key]:"__CLEAR__"}})});
-    const j=await r.json();setSettingStatus(j.settings||{});setSettings(v=>({...v,[key]:key==="OPENAI_MODEL"?"gpt-5.6":""}));setSaveState("Removed");
+  async function readCsvFile(file?:File){if(file)setCsv(await file.text());}
+  async function createCampaign(){
+    setLoading(true);setNotice("Creating campaign in safe Dry Run mode…");
+    const body={name:campaignForm.name,goal:campaignForm.goal,audience:campaignForm.audience,dailyLimit:Number(campaignForm.dailyLimit),sendWindowStart:9,sendWindowEnd:17,timezone:"Asia/Dhaka",weekdaysOnly:true,dryRun:true,steps:[{delayHours:0,subject:campaignForm.initialSubject,text:campaignForm.initialText},{delayHours:72,subject:campaignForm.follow1Subject,text:campaignForm.follow1Text},{delayHours:120,subject:campaignForm.follow2Subject,text:campaignForm.follow2Text}]};
+    const r=await fetch("/api/campaigns",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const j=await r.json();setLoading(false);setNotice(r.ok?"Campaign created. Dry Run is ON.":j.error||"Campaign creation failed");if(r.ok)void loadCore();
   }
+  async function updateCampaign(id:string,patch:Record<string,unknown>){const r=await fetch("/api/campaigns",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({id,...patch})});setNotice(r.ok?"Campaign updated.":"Update failed");void loadCore();}
+  async function enrollAll(id:string){const r=await fetch("/api/campaigns/enroll",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({campaignId:id,allEligible:true})});const j=await r.json();setNotice(r.ok?`${j.enrolled} eligible contacts enrolled.`:"Enrollment failed");void loadCore();}
+  async function previewCampaign(id:string){setPreview(null);const r=await fetch("/api/campaigns/preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({campaignId:id,limit:3})});setPreview(await r.json());}
+  async function runAgent(){setCommandResult("Planning…");try{const j=await fetch("/api/agent/command",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({command})}).then(r=>r.json());setCommandResult(j.summary||j.error||"Command received");}catch{setCommandResult("Agent request failed");}}
+
   const settingGroups=[
-    {title:"Hostinger Mail",desc:"Mail sending, mailbox access and inbound webhook verification.",fields:[["HOSTINGER_MAIL_TOKEN","Mail API token",true],["HOSTINGER_MAILBOX_RESOURCE_ID","Mailbox resource ID",false],["HOSTINGER_WEBHOOK_SECRET","Webhook secret",true]]},
-    {title:"OpenAI",desc:"AI planning, reply classification and future research agents.",fields:[["OPENAI_API_KEY","OpenAI API key",true],["OPENAI_MODEL","Model",false]]},
-    {title:"Telegram",desc:"Receive hot-lead and interested-reply notifications.",fields:[["TELEGRAM_BOT_TOKEN","Bot token",true],["TELEGRAM_CHAT_ID","Chat ID",false]]},
-    {title:"Agent API",desc:"Protect REST/OpenClaw access to the LeadPilot agent endpoints.",fields:[["AGENT_API_KEY","Agent API key",true]]}
+    {title:"Hostinger Mail",desc:"Sending identity and secure inbound webhook.",fields:[["HOSTINGER_MAIL_TOKEN","Mail API token",true],["HOSTINGER_MAILBOX_RESOURCE_ID","Mailbox resource ID",false],["HOSTINGER_FROM_ADDRESS","From address",false],["HOSTINGER_WEBHOOK_SECRET","Webhook secret",true]]},
+    {title:"OpenAI",desc:"Reply classification and campaign planning.",fields:[["OPENAI_API_KEY","OpenAI API key",true],["OPENAI_MODEL","Model",false]]},
+    {title:"Telegram",desc:"Instant notification for every new reply.",fields:[["TELEGRAM_BOT_TOKEN","Bot token",true],["TELEGRAM_CHAT_ID","Chat ID",false]]},
+    {title:"Security",desc:"Separate credentials for agents and scheduled workers.",fields:[["AGENT_API_KEY","Agent API key",true],["OUTREACH_CRON_SECRET","Cron secret",true]]}
   ] as const;
-  const [result,setResult]=useState("Ready");
-  async function run(){
-    setResult("Planning…");
-    try{const r=await fetch('/api/agent/command',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({command})});const j=await r.json();setResult(j.summary||j.error||'Command received');}catch{setResult('Demo command accepted — configure the backend API key for agent execution.');}
-  }
+
+  const statCards=[[stats.leads,"Contacts","Permission checked"],[stats.queued,"Queued","Awaiting sequence"],[stats.contacted,"Contacted","Successful sends"],[stats.replies,"Replies","Sequences stopped"],[stats.interested,"Interested","High intent"],[stats.activeCampaigns,"Active","Campaigns running"]];
   return <div className="app">
-    <aside className="sidebar"><div className="brand"><div className="brandMark"><Radar size={18}/></div><span>LeadPilot AI</span></div>
-      {nav.map(([group,items])=><div key={group}><div className="navLabel">{group}</div>{items.map(([Icon,label])=><button className={`navItem navButton ${active===label?'active':''}`} key={label} onClick={()=>setActive(label)}><Icon size={16}/><span>{label}</span></button>)}</div>)}
-    </aside>
+    <aside className="sidebar"><div className="brand"><div className="brandMark"><Radar size={18}/></div><span>LeadPilot AI</span></div>{nav.map(([group,items])=><div key={group}><div className="navLabel">{group}</div>{items.map(([Icon,label])=><button className={`navItem navButton ${active===label?"active":""}`} key={label} onClick={()=>setActive(label)}><Icon size={16}/><span>{label}</span></button>)}</div>)}</aside>
     <main className="main">
-      {active==="Settings" || active==="Integrations" ? <>
-        <div className="top"><div><div className="eyebrow">Local configuration</div><h1 className="title">Integrations & Secrets</h1><div className="sub">Credentials are encrypted and stored on this server. Existing secrets are never returned to the browser.</div></div><div className="pill"><span className="dot"/>Local encrypted store</div></div>
-        <div className="settingsNotice"><ShieldBan size={17}/><div><b>Secrets stay local to this LeadPilot installation.</b><div>They are stored in <span className="code">data/settings.enc.json</span> using a locally generated AES-256-GCM key. Environment variables remain fallback values.</div></div></div>
-        <div className="settingsGrid">{settingGroups.map(group=><section className="card settingsCard" key={group.title}><div className="panelHead"><div><div className="panelTitle">{group.title}</div><div className="panelMeta settingsDesc">{group.desc}</div></div></div>{group.fields.map(([key,label,secret])=>{const st=settingStatus[key];return <div className="settingRow" key={key}><div className="settingLabel"><label>{label}</label><span className={`configState ${st?.configured?'configured':''}`}>{st?.configured?`Configured · ${st.source}`:'Not configured'}</span></div><div className="settingInputRow"><input className="settingInput" type={secret?'password':'text'} value={settings[key]||''} placeholder={st?.configured&&secret?'••••••••••••••••':key==='OPENAI_MODEL'?'gpt-5.6':`Enter ${label.toLowerCase()}`} onChange={e=>updateSetting(key,e.target.value)}/>{st?.configured&&<button className="button ghost" onClick={()=>clearSetting(key)}>Remove</button>}</div><div className="fieldKey">{key}</div></div>})}</section>)}</div>
-        <div className="settingsActions"><div className="saveState">{saveState}</div><button className="button saveButton" onClick={saveSettings}>Save settings locally</button></div>
-      </> : <>
-      <div className="top"><div><div className="eyebrow">AI sales operating system</div><h1 className="title">Outreach Command Center</h1><div className="sub">Research prospects, personalize outreach, track replies and surface buying intent.</div></div><div className="pill"><span className="dot"/>System operational</div></div>
+      <div className="top"><div><div className="eyebrow">AI outreach operating system</div><h1 className="title">{active}</h1><div className="sub">Hostinger Mail campaigns, automatic follow-ups and reply intelligence.</div></div><div className="pill"><span className="dot"/>Safe automation ready</div></div>
+      {notice&&<div className="notice"><CheckCircle2 size={16}/><span>{notice}</span><button onClick={()=>setNotice("")}>×</button></div>}
 
-      <section className="grid stats">
-        {[['1,482','Leads','+142 this week'],['326','Contacted','22.0% of leads'],['84','Replies','25.8% reply rate'],['29','Positive','34.5% of replies'],['12','Opportunities','41.3% qualified'],['4','Won','$2.4k pipeline']].map(([v,l,f],i)=><div className="card stat" key={l}><div className="statLabel">{l}</div><div className="statValue">{v}</div><div className={`statFoot ${i>2?'positive':''}`}>{f}</div></div>)}
-      </section>
+      {active==="Overview"&&<><section className="grid stats">{statCards.map(([v,l,f])=><div className="card stat" key={String(l)}><div className="statLabel">{l}</div><div className="statValue">{v}</div><div className="statFoot">{f}</div></div>)}</section><section className="grid contentGrid"><div className="card panel"><div className="panelHead"><div><div className="panelTitle">Campaign health</div><div className="panelMeta">Live database results</div></div><button className="button secondary" onClick={()=>setActive("Campaigns")}>Manage campaigns</button></div>{campaigns.length?campaigns.slice(0,5).map(c=><CampaignRow key={c.id} campaign={c}/>):<Empty text="Create your first campaign to begin."/>}</div><div className="card panel"><div className="panelTitle">Safety controls</div><div className="checkList"><div><CheckCircle2/>Permission confirmation on import</div><div><CheckCircle2/>Daily sending limit</div><div><CheckCircle2/>Reply-stop & suppression</div><div><CheckCircle2/>Dry Run before live sending</div><div><CheckCircle2/>Weekday send window</div></div></div></section></>}
 
-      <section className="card command"><div className="panelHead"><div><div className="panelTitle"><Sparkles size={15} style={{verticalAlign:'-3px',marginRight:7}}/>AI Agent Command</div><div className="panelMeta" style={{marginTop:5}}>OpenAI / OpenClaw can use the same REST + MCP tools.</div></div><span className="badge reply">ASSISTED MODE</span></div><div className="commandBox"><input className="commandInput" value={command} onChange={e=>setCommand(e.target.value)}/><button className="button" onClick={run}><Send size={13} style={{verticalAlign:'-2px',marginRight:6}}/>Run Agent</button></div><div className="footerNote">{result}</div></section>
+      {active==="Leads"&&<><section className="grid contentGrid"><div className="card panel"><div className="panelTitle">Import contacts from CSV</div><div className="panelMeta blockMeta">Columns supported: name, first_name, last_name, email, company, role, website, location.</div><input type="file" accept=".csv,text/csv" className="fileInput" onChange={e=>void readCsvFile(e.target.files?.[0])}/><textarea className="textarea" value={csv} onChange={e=>setCsv(e.target.value)} placeholder={'name,email,company\nJohn Smith,john@example.com,Example Inc'}/><div className="formGrid"><input className="settingInput" value={permissionSource} onChange={e=>setPermissionSource(e.target.value)} placeholder="Permission/list source"/><select className="settingInput" value={importCampaignId} onChange={e=>setImportCampaignId(e.target.value)}><option value="">Import without campaign</option>{campaigns.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div><label className="consent"><input type="checkbox" checked={permissionConfirmed} onChange={e=>setPermissionConfirmed(e.target.checked)}/>I confirm these contacts are permitted to receive this outreach and are not purchased/scraped personal addresses.</label><button className="button" disabled={loading||!csv} onClick={importCsv}><Upload size={14}/> Import contacts</button></div><div className="card panel"><div className="panelTitle">Import protection</div><div className="apiBox">Duplicates are matched by email. Invalid rows are reported. Contacts are not eligible for campaigns until permission is confirmed. Unsubscribed and bounced addresses remain suppressed.</div></div></section><DataTable leads={leads}/></>}
 
-      <section className="grid contentGrid">
-        <div className="card panel"><div className="panelHead"><div className="panelTitle">Top qualified leads</div><div className="panelMeta">AI-ranked by opportunity</div></div><table className="table"><thead><tr><th>Lead</th><th>Location</th><th>Score</th><th>Status</th></tr></thead><tbody>{leads.map(l=><tr key={l.name}><td><div className="person"><div className="avatar">{l.initials}</div><div><div className="name">{l.name}</div><div className="small">{l.company}</div></div></div></td><td>{l.location}</td><td><div className="score"><b>{l.score}</b><span className="scoreBar"><span className="scoreFill" style={{width:`${l.score}%`,display:'block'}}/></span></div></td><td><span className={`badge ${l.class}`}>{l.status}</span></td></tr>)}</tbody></table></div>
-        <div className="card panel"><div className="panelHead"><div className="panelTitle">Live AI activity</div><div className="panelMeta">Last 15 minutes</div></div><div className="activity">
-          <div className="activityItem"><div className="time">02:14</div><div className="activityText"><b>Researching 48 Florida agents</b><br/>Company pages + public business profiles</div></div>
-          <div className="activityItem"><div className="time">02:13</div><div className="activityText"><b>Sarah Johnson qualified — 92</b><br/>Strong personal-branding opportunity</div></div>
-          <div className="activityItem"><div className="time">02:12</div><div className="activityText"><b>Follow-up eligibility checked</b><br/>No reply, no suppression, campaign active</div></div>
-          <div className="activityItem"><div className="time">02:11</div><div className="activityText"><b>🔥 New buying signal detected</b><br/>Emily asked for portfolio examples</div></div>
-        </div></div>
-      </section>
+      {active==="Campaigns"&&<><section className="grid contentGrid"><div className="card panel campaignBuilder"><div className="panelHead"><div><div className="panelTitle">New campaign</div><div className="panelMeta">Created with Dry Run enabled</div></div><FlaskConical size={20}/></div><div className="formGrid"><input className="settingInput" value={campaignForm.name} onChange={e=>setCampaignForm(v=>({...v,name:e.target.value}))} placeholder="Campaign name"/><input className="settingInput" type="number" min="1" max="100" value={campaignForm.dailyLimit} onChange={e=>setCampaignForm(v=>({...v,dailyLimit:Number(e.target.value)}))} placeholder="Daily limit"/></div><input className="settingInput" value={campaignForm.goal} onChange={e=>setCampaignForm(v=>({...v,goal:e.target.value}))} placeholder="Goal"/><input className="settingInput" value={campaignForm.audience} onChange={e=>setCampaignForm(v=>({...v,audience:e.target.value}))} placeholder="Audience"/><SequenceEditor label="Initial email" subject={campaignForm.initialSubject} text={campaignForm.initialText} onSubject={value=>setCampaignForm(v=>({...v,initialSubject:value}))} onText={value=>setCampaignForm(v=>({...v,initialText:value}))}/><SequenceEditor label="Follow-up 1 · after 3 days" subject={campaignForm.follow1Subject} text={campaignForm.follow1Text} onSubject={value=>setCampaignForm(v=>({...v,follow1Subject:value}))} onText={value=>setCampaignForm(v=>({...v,follow1Text:value}))}/><SequenceEditor label="Follow-up 2 · after 5 days" subject={campaignForm.follow2Subject} text={campaignForm.follow2Text} onSubject={value=>setCampaignForm(v=>({...v,follow2Subject:value}))} onText={value=>setCampaignForm(v=>({...v,follow2Text:value}))}/><button className="button" disabled={loading} onClick={createCampaign}>Create safe campaign</button></div><div className="card panel"><div className="panelTitle">How scheduling works</div><div className="timeline"><div><b>09:00–17:00 Asia/Dhaka</b><span>Weekdays only</span></div><div><b>Daily cap</b><span>Default 10 emails</span></div><div><b>Reply received</b><span>All follow-ups stop instantly</span></div><div><b>Dry Run</b><span>Preview only until explicitly disabled</span></div></div></div></section><section className="card panel listPanel"><div className="panelTitle">Campaigns</div>{campaigns.length?campaigns.map(c=><div className="campaignManage" key={c.id}><CampaignRow campaign={c}/><div className="actions"><button className="button secondary" onClick={()=>enrollAll(c.id)}><Users size={13}/> Enroll eligible</button><button className="button secondary" onClick={()=>previewCampaign(c.id)}><Eye size={13}/> Preview</button>{c.status==="ACTIVE"?<button className="button secondary" onClick={()=>updateCampaign(c.id,{status:"PAUSED"})}><Pause size={13}/> Pause</button>:<button className="button secondary" onClick={()=>updateCampaign(c.id,{status:"ACTIVE"})}><Play size={13}/> Activate</button>}<button className={`button ${c.dryRun?"":"danger"}`} onClick={()=>{if(c.dryRun&&!confirm("Enable live sending? Eligible emails can be sent by the worker after this change."))return;void updateCampaign(c.id,{dryRun:!c.dryRun});}}>{c.dryRun?"Enable live sending":"Live sending ON"}</button></div></div>):<Empty text="No campaigns yet."/>}</section>{preview&&<PreviewModal data={preview} onClose={()=>setPreview(null)}/>}</>}
 
-      <section className="grid contentGrid">
-        <div className="card panel"><div className="panelHead"><div className="panelTitle">Pipeline funnel</div><div className="panelMeta">Realtor campaign</div></div><div className="funnel">{[['Discovered','1,482'],['Qualified','718'],['Contacted','326'],['Replied','84'],['Positive','29']].map(([l,n])=><div className="funnelStep" key={l}><div className="funnelNum">{n}</div><div className="funnelLab">{l}</div></div>)}</div><div className="apiBox"><CheckCircle2 size={13} style={{verticalAlign:'-2px',marginRight:6}}/><b>Policy layer active.</b> Agent send requests pass through suppression, reply-stop, campaign-state and mailbox-limit checks before Hostinger is called.</div></div>
-        <div className="card panel"><div className="panelHead"><div className="panelTitle">Campaigns</div><button className="button secondary">New campaign</button></div><div className="campaign"><div><div className="campaignName">US Realtors — Signature Design</div><div className="campaignStats"><span>326 leads</span><span>84 replies</span><span>29 positive</span></div></div><span className="badge hot">ACTIVE</span></div><div className="campaign"><div><div className="campaignName">Texas Brokerages</div><div className="campaignStats"><span>118 leads</span><span>22 replies</span><span>9 positive</span></div></div><span className="badge">PAUSED</span></div><div className="apiBox"><span className="code">MCP:</span> plan_outreach · list_leads · send_email<br/><span className="code">REST:</span> /api/agent/command · /api/mail/send · /api/webhooks/hostinger</div></div>
-      </section>
-      </>}
+      {active==="Inbox"&&<section className="card panel listPanel"><div className="panelHead"><div><div className="panelTitle">Reply inbox</div><div className="panelMeta">Every reply stops future follow-ups and triggers Telegram.</div></div><Bell size={18}/></div>{inbox.length?inbox.map(item=><div className="inboxItem" key={item.id}><div className="avatar">{(item.lead?.fullName||item.fromAddress).slice(0,2).toUpperCase()}</div><div className="inboxBody"><div className="inboxTop"><b>{item.lead?.fullName||item.fromAddress}</b><span className="badge reply">{item.intent||"REPLY"}</span></div><div className="campaignName">{item.subject}</div><div className="small lineClamp">{item.textBody||"No preview available"}</div><div className="fieldKey">{item.campaign?.name||"Unmatched campaign"}</div></div></div>):<Empty text="Replies will appear here after the Hostinger webhook is connected."/>}</section>}
+
+      {active==="AI Agent"&&<section className="card command"><div className="panelHead"><div><div className="panelTitle"><Sparkles size={15}/> AI Agent Command</div><div className="panelMeta">Planning only; sending still passes policy checks.</div></div></div><div className="commandBox"><input className="commandInput" value={command} onChange={e=>setCommand(e.target.value)}/><button className="button" onClick={runAgent}><Send size={13}/> Run Agent</button></div><div className="agentResult">{commandResult}</div></section>}
+
+      {active==="Automations"&&<section className="grid contentGrid"><div className="card panel"><div className="panelTitle">Automation worker</div><div className="apiBox"><span className="code">npm run worker</span><br/>Checks due campaigns every 30 minutes and spaces sends across the day. Each send is re-checked for permission, suppression, reply, campaign status, daily limit and send window.</div><div className="timeline"><div><b>Initial email</b><span>When enrolled and campaign active</span></div><div><b>Follow-up 1</b><span>After 72 hours without reply</span></div><div><b>Follow-up 2</b><span>After another 120 hours</span></div></div></div><div className="card panel"><div className="panelTitle">Cron endpoint</div><div className="apiBox"><span className="code">POST /api/automation/run</span><br/>Authorization: Bearer OUTREACH_CRON_SECRET<br/><br/>Use this from Hostinger cron, n8n or another trusted scheduler.</div></div></section>}
+
+      {(active==="Settings"||active==="Integrations")&&<><div className="settingsNotice"><ShieldBan size={17}/><div><b>Secrets stay encrypted on this installation.</b><div>They are never returned to the browser after saving.</div></div></div><div className="settingsGrid">{settingGroups.map(group=><section className="card settingsCard" key={group.title}><div className="panelTitle">{group.title}</div><div className="panelMeta settingsDesc">{group.desc}</div>{group.fields.map(([key,label,secret])=>{const st=settingStatus[key];return <div className="settingRow" key={key}><div className="settingLabel"><label>{label}</label><span className={`configState ${st?.configured?"configured":""}`}>{st?.configured?`Configured · ${st.source}`:"Not configured"}</span></div><div className="settingInputRow"><input className="settingInput" type={secret?"password":"text"} value={settings[key]||""} placeholder={st?.configured&&secret?"••••••••••••••••":`Enter ${label.toLowerCase()}`} onChange={e=>updateSetting(key,e.target.value)}/>{st?.configured&&<button className="button ghost" onClick={()=>clearSetting(key)}>Remove</button>}</div><div className="fieldKey">{key}</div></div>})}{group.title==="Telegram"&&<button className="button secondary" onClick={testTelegram}>Send test notification</button>}</section>)}</div><div className="settingsActions"><div className="saveState">{saveState}</div><button className="button saveButton" onClick={saveSettings}>Save settings locally</button></div></>}
+
+      {!["Overview","Leads","Campaigns","Inbox","AI Agent","Automations","Settings","Integrations"].includes(active)&&<section className="card panel"><Empty text={`${active} is connected to the shared data model and ready for the next reporting module.`}/></section>}
     </main>
-  </div>
+  </div>;
 }
+
+function CampaignRow({campaign}:{campaign:Campaign}){return <div className="campaign"><div><div className="campaignName">{campaign.name}</div><div className="campaignStats"><span>{campaign._count.leads} contacts</span><span>{campaign.sent} sent</span><span>{campaign.replies} replies</span><span>{campaign.dailyLimit}/day</span></div></div><div className="statusStack"><span className={`badge ${campaign.status==="ACTIVE"?"hot":""}`}>{campaign.status}</span><span className={`badge ${campaign.dryRun?"reply":"hot"}`}>{campaign.dryRun?"DRY RUN":"LIVE"}</span></div></div>}
+function Empty({text}:{text:string}){return <div className="empty"><Radar size={24}/><span>{text}</span></div>}
+function DataTable({leads}:{leads:Lead[]}){return <section className="card panel listPanel"><div className="panelHead"><div className="panelTitle">Contacts</div><div className="panelMeta">{leads.length} shown</div></div><div className="tableWrap"><table className="table"><thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Status</th><th>Permission</th></tr></thead><tbody>{leads.map(lead=><tr key={lead.id}><td>{lead.fullName}</td><td>{lead.email}</td><td>{lead.company||"—"}</td><td><span className="badge">{lead.status}</span></td><td><span className={`badge ${lead.outreachAllowed?"hot":""}`}>{lead.outreachAllowed?"ELIGIBLE":"BLOCKED"}</span></td></tr>)}</tbody></table></div></section>}
+function SequenceEditor({label,subject,text,onSubject,onText}:{label:string;subject:string;text:string;onSubject:(v:string)=>void;onText:(v:string)=>void}){return <details className="sequence" open={label==="Initial email"}><summary>{label}</summary><input className="settingInput" value={subject} onChange={e=>onSubject(e.target.value)} placeholder="Subject"/><textarea className="textarea short" value={text} onChange={e=>onText(e.target.value)} placeholder="Email text"/></details>}
+function PreviewModal({data,onClose}:{data:any;onClose:()=>void}){const previews=(data?.campaigns||[]).flatMap((c:any)=>c.previews||[]);return <div className="modalBackdrop" onClick={onClose}><div className="modal" onClick={e=>e.stopPropagation()}><div className="panelHead"><div><div className="panelTitle">Dry Run preview</div><div className="panelMeta">Nothing was sent.</div></div><button className="button secondary" onClick={onClose}>Close</button></div>{previews.length?previews.map((p:any)=><div className="previewMail" key={`${p.leadId}-${p.step}`}><div className="fieldKey">TO: {p.to} · STEP {p.step+1}</div><b>{p.subject}</b><pre>{p.text}</pre></div>):<Empty text="Enroll eligible contacts and activate the campaign to generate previews."/>}</div></div>}

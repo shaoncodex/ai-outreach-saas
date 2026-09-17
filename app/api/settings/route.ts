@@ -5,12 +5,14 @@ import { getSettingsStatus, writeLocalSettings } from "@/lib/settings";
 const Body = z.object({ values: z.object({
   HOSTINGER_MAIL_TOKEN: z.string().optional(),
   HOSTINGER_MAILBOX_RESOURCE_ID: z.string().optional(),
+  HOSTINGER_FROM_ADDRESS: z.string().optional(),
   HOSTINGER_WEBHOOK_SECRET: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
-  AGENT_API_KEY: z.string().optional()
+  AGENT_API_KEY: z.string().optional(),
+  OUTREACH_CRON_SECRET: z.string().optional()
 }) });
 
 export async function GET() {

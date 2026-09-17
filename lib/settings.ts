@@ -5,12 +5,14 @@ import crypto from "crypto";
 export type AppSettingKey =
   | "HOSTINGER_MAIL_TOKEN"
   | "HOSTINGER_MAILBOX_RESOURCE_ID"
+  | "HOSTINGER_FROM_ADDRESS"
   | "HOSTINGER_WEBHOOK_SECRET"
   | "OPENAI_API_KEY"
   | "OPENAI_MODEL"
   | "TELEGRAM_BOT_TOKEN"
   | "TELEGRAM_CHAT_ID"
-  | "AGENT_API_KEY";
+  | "AGENT_API_KEY"
+  | "OUTREACH_CRON_SECRET";
 
 export type AppSettings = Partial<Record<AppSettingKey, string>>;
 
@@ -83,8 +85,8 @@ export async function getSetting(key: AppSettingKey, fallback?: string) {
 export async function getSettingsStatus() {
   const local = await readLocalSettings();
   const keys: AppSettingKey[] = [
-    "HOSTINGER_MAIL_TOKEN","HOSTINGER_MAILBOX_RESOURCE_ID","HOSTINGER_WEBHOOK_SECRET",
-    "OPENAI_API_KEY","OPENAI_MODEL","TELEGRAM_BOT_TOKEN","TELEGRAM_CHAT_ID","AGENT_API_KEY"
+    "HOSTINGER_MAIL_TOKEN","HOSTINGER_MAILBOX_RESOURCE_ID","HOSTINGER_FROM_ADDRESS","HOSTINGER_WEBHOOK_SECRET",
+    "OPENAI_API_KEY","OPENAI_MODEL","TELEGRAM_BOT_TOKEN","TELEGRAM_CHAT_ID","AGENT_API_KEY","OUTREACH_CRON_SECRET"
   ];
   return Object.fromEntries(keys.map(key => [key, {
     configured: Boolean(local[key] || process.env[key]),
