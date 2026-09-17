@@ -1,151 +1,236 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
 
-enum LeadStatus { NEW RESEARCHED QUALIFIED CONTACTED REPLIED INTERESTED NOT_INTERESTED WON LOST UNSUBSCRIBED BOUNCED }
-enum CampaignStatus { DRAFT ACTIVE PAUSED COMPLETED ARCHIVED }
-enum MessageDirection { INBOUND OUTBOUND }
-enum MessageStatus { DRAFT SCHEDULED SENT RECEIVED FAILED CANCELLED }
-enum Intent { INTERESTED NOT_INTERESTED QUESTION PRICING_REQUEST MEETING_REQUEST REFERRAL OUT_OF_OFFICE UNSUBSCRIBE BOUNCE OTHER }
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
-enum AutopilotMode { MANUAL ASSISTED AUTOPILOT }
+enum LeadStatus {
+  NEW
+  RESEARCHED
+  QUALIFIED
+  CONTACTED
+  REPLIED
+  INTERESTED
+  NOT_INTERESTED
+  WON
+  LOST
+  UNSUBSCRIBED
+  BOUNCED
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+  RECEIVED
+  FAILED
+  CANCELLED
+}
+
+enum Intent {
+  INTERESTED
+  NOT_INTERESTED
+  QUESTION
+  PRICING_REQUEST
+  MEETING_REQUEST
+  REFERRAL
+  OUT_OF_OFFICE
+  UNSUBSCRIBE
+  BOUNCE
+  OTHER
+}
+
+enum AutopilotMode {
+  MANUAL
+  ASSISTED
+  AUTOPILOT
+}
 
 model Workspace {
-  id String @id @default(cuid())
-  name String
-  createdAt DateTime @default(now())
-  leads Lead[]
-  campaigns Campaign[]
-  mailboxes Mailbox[]
-  suppressions Suppression[]
-  agentRuns AgentRun[]
+  id            String         @id @default(cuid())
+  name          String
+  createdAt     DateTime       @default(now())
+  leads         Lead[]
+  campaigns     Campaign[]
+  mailboxes     Mailbox[]
+  suppressions  Suppression[]
+  agentRuns     AgentRun[]
+  webhookEvents WebhookEvent[]
 }
 
 model Mailbox {
-  id String @id @default(cuid())
+  id          String     @id @default(cuid())
   workspaceId String
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  address String
-  provider String @default("hostinger")
-  resourceId String
-  dailyLimit Int @default(40)
-  hourlyLimit Int @default(10)
-  active Boolean @default(true)
-  createdAt DateTime @default(now())
-  campaigns Campaign[]
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  address     String
+  provider    String     @default("hostinger")
+  resourceId  String
+  dailyLimit  Int        @default(40)
+  hourlyLimit Int        @default(10)
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  campaigns   Campaign[]
+
+  @@unique([workspaceId, resourceId])
 }
 
 model Lead {
-  id String @id @default(cuid())
-  workspaceId String
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  firstName String?
-  lastName String?
-  fullName String
-  email String
-  company String?
-  role String?
-  website String?
-  location String?
-  sourceUrl String?
-  score Int @default(0)
-  status LeadStatus @default(NEW)
-  researchSummary String?
+  id                   String         @id @default(cuid())
+  workspaceId          String
+  workspace            Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  firstName            String?
+  lastName             String?
+  fullName             String
+  email                String
+  company              String?
+  role                 String?
+  website              String?
+  location             String?
+  sourceUrl            String?
+  score                Int            @default(0)
+  status               LeadStatus     @default(NEW)
+  researchSummary      String?
   personalizationAngle String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  campaignLeads CampaignLead[]
-  messages EmailMessage[]
+  outreachAllowed      Boolean        @default(false)
+  permissionSource     String?
+  unsubscribedAt       DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  campaignLeads        CampaignLead[]
+  messages             EmailMessage[]
+
   @@unique([workspaceId, email])
   @@index([workspaceId, status])
 }
 
 model Campaign {
-  id String @id @default(cuid())
-  workspaceId String
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  mailboxId String?
-  mailbox Mailbox? @relation(fields: [mailboxId], references: [id])
-  name String
-  goal String
-  audience String?
-  status CampaignStatus @default(DRAFT)
-  mode AutopilotMode @default(ASSISTED)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  steps SequenceStep[]
-  leads CampaignLead[]
-  messages EmailMessage[]
+  id              String         @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  mailboxId       String?
+  mailbox         Mailbox?       @relation(fields: [mailboxId], references: [id])
+  name            String
+  goal            String
+  audience        String?
+  status          CampaignStatus @default(DRAFT)
+  mode            AutopilotMode  @default(ASSISTED)
+  dailyLimit      Int            @default(10)
+  sendWindowStart Int            @default(9)
+  sendWindowEnd   Int            @default(17)
+  timezone        String         @default("Asia/Dhaka")
+  weekdaysOnly    Boolean        @default(true)
+  dryRun          Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  steps           SequenceStep[]
+  leads           CampaignLead[]
+  messages        EmailMessage[]
 }
 
 model CampaignLead {
-  id String @id @default(cuid())
-  campaignId String
-  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  leadId String
-  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  currentStep Int @default(0)
+  id           String    @id @default(cuid())
+  campaignId   String
+  campaign     Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leadId       String
+  lead         Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  currentStep  Int       @default(0)
   nextActionAt DateTime?
-  stopped Boolean @default(false)
-  stopReason String?
+  stopped      Boolean   @default(false)
+  stopReason   String?
+
   @@unique([campaignId, leadId])
 }
 
 model SequenceStep {
-  id String @id @default(cuid())
-  campaignId String
-  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  step Int
-  delayHours Int
-  purpose String
+  id              String   @id @default(cuid())
+  campaignId      String
+  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  step            Int
+  delayHours      Int
+  purpose         String
   subjectTemplate String?
-  instruction String
+  instruction     String
+  textTemplate    String?
+  htmlTemplate    String?
+
   @@unique([campaignId, step])
 }
 
 model EmailMessage {
-  id String @id @default(cuid())
-  leadId String?
-  lead Lead? @relation(fields: [leadId], references: [id])
-  campaignId String?
-  campaign Campaign? @relation(fields: [campaignId], references: [id])
-  direction MessageDirection
-  status MessageStatus
+  id                String           @id @default(cuid())
+  leadId            String?
+  lead              Lead?            @relation(fields: [leadId], references: [id])
+  campaignId        String?
+  campaign          Campaign?        @relation(fields: [campaignId], references: [id])
+  direction         MessageDirection
+  status            MessageStatus
   providerMessageId String?
-  inReplyTo String?
-  threadKey String?
-  fromAddress String
-  toAddress String
-  subject String
-  textBody String?
-  htmlBody String?
-  intent Intent?
-  intentConfidence Float?
-  scheduledFor DateTime?
-  sentAt DateTime?
-  receivedAt DateTime?
-  createdAt DateTime @default(now())
+  inReplyTo         String?
+  threadKey         String?
+  fromAddress       String
+  toAddress         String
+  subject           String
+  textBody          String?
+  htmlBody          String?
+  intent            Intent?
+  intentConfidence  Float?
+  scheduledFor      DateTime?
+  sentAt            DateTime?
+  receivedAt        DateTime?
+  createdAt         DateTime         @default(now())
+  sequenceStep      Int?
+  errorMessage      String?
+
   @@index([leadId, createdAt])
   @@index([campaignId, createdAt])
+  @@index([providerMessageId])
 }
 
 model Suppression {
-  id String @id @default(cuid())
+  id          String    @id @default(cuid())
   workspaceId String
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  email String
-  reason String
-  global Boolean @default(false)
-  createdAt DateTime @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  reason      String
+  global      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
   @@unique([workspaceId, email])
 }
 
 model AgentRun {
-  id String @id @default(cuid())
+  id          String    @id @default(cuid())
   workspaceId String
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  command String
-  status String
-  result Json?
-  createdAt DateTime @default(now())
-  finishedAt DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  command     String
+  status      String
+  result      Json?
+  createdAt   DateTime  @default(now())
+  finishedAt  DateTime?
+}
+
+model WebhookEvent {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  providerEventId String    @unique
+  eventType       String
+  payload         Json
+  processedAt     DateTime  @default(now())
 }

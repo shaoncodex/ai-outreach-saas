@@ -1,23 +1,39 @@
 # LeadPilot AI
 
-AI-assisted B2B lead research, compliant outreach, follow-up automation and inbox intelligence powered by Hostinger Mail API.
+Database-backed outreach and follow-up automation for Hostinger Mail. It imports permission-confirmed contacts, sends a controlled number of personalized emails, stops follow-ups on any reply, classifies intent and alerts Telegram.
 
-## Included in this MVP
-- Premium responsive SaaS dashboard
-- Agent Command Center
-- Hostinger Mail SDK send wrapper (`@hostinger/mail-sdk`)
-- Hostinger `message.received` webhook endpoint
-- AI reply-intent classification with demo fallback
-- Telegram hot-lead notifications
-- REST API secured with `x-api-key`
-- MCP server for OpenClaw / OpenAI / Claude-compatible clients
-- PostgreSQL + Prisma multi-tenant-ready data model
-- BullMQ / Redis follow-up queue adapter
-- Suppression/reply-stop/daily-limit policy layer
-- Demo lead and campaign endpoints
-- Docker Compose for PostgreSQL + Redis
+## What is working
 
-## Quick start
+- CSV contact import with header aliases, validation and duplicate protection
+- Mandatory permission-source confirmation before a contact becomes send-eligible
+- Campaign builder with initial email plus follow-up steps
+- `{{firstName}}`, `{{fullName}}`, `{{company}}`, `{{role}}`, `{{website}}` and `{{location}}` variables
+- Default limit of 10 emails per campaign/mailbox per rolling 24 hours
+- Weekday and local-time send window (default: 09:00–17:00 Asia/Dhaka)
+- Dry Run enabled on every new campaign
+- Real Hostinger Mail sending only after Live mode is explicitly enabled
+- Automatic reply-stop, unsubscribe and bounce suppression
+- Idempotent Hostinger inbound webhook processing
+- Telegram notification for every reply
+- PostgreSQL/Prisma persistence and a standalone worker
+- Encrypted local integration settings
+- REST and MCP access for agents
+
+## Safe operating flow
+
+1. Create a campaign. It starts in `DRAFT` and `Dry Run` mode.
+2. Import a CSV and confirm the lawful/permission source.
+3. Enroll eligible contacts in the campaign.
+4. Activate the campaign.
+5. Preview three generated emails. Nothing is sent during preview.
+6. Configure Hostinger Mail and Telegram, then send tests.
+7. Explicitly disable Dry Run only after reviewing the preview.
+8. Run the worker or call the protected cron endpoint.
+
+Any inbound reply stops all pending follow-ups for the matched contact. `UNSUBSCRIBE` and `BOUNCE` replies also add the address to the suppression list.
+
+## Local setup
+
 ```bash
 cp .env.example .env
 npm install
@@ -26,93 +42,77 @@ npx prisma generate
 npx prisma db push
 npm run dev
 ```
-Open http://localhost:3000
 
-## Connect Hostinger
-Create a Hostinger Mail API token in hPanel and set:
+Open `http://localhost:3000` and configure integrations under **Settings**.
+
+## Required configuration
+
 ```env
-HOSTINGER_MAIL_TOKEN=...
-HOSTINGER_MAILBOX_RESOURCE_ID=AC...
+DATABASE_URL=postgresql://leadpilot:leadpilot@localhost:5432/leadpilot?schema=public
+HOSTINGER_MAIL_TOKEN=
+HOSTINGER_MAILBOX_RESOURCE_ID=
+HOSTINGER_FROM_ADDRESS=hello@shaonrahman.com
+HOSTINGER_WEBHOOK_SECRET=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.6
+AGENT_API_KEY=
+OUTREACH_CRON_SECRET=
 ```
-Then test:
+
+Credentials may instead be added from the dashboard. They are encrypted into `data/settings.enc.json` with a separate local key in `data/.settings-key`; both files are ignored by Git.
+
+## Run scheduling
+
+### Long-running worker
+
 ```bash
-curl -X POST http://localhost:3000/api/mail/send \
-  -H 'content-type: application/json' \
-  -H 'x-api-key: YOUR_AGENT_API_KEY' \
-  -d '{"to":"you@example.com","subject":"LeadPilot test","text":"Hello from LeadPilot"}'
+npm run worker
 ```
+
+It checks due campaigns every 30 minutes and sends at most one due message per campaign on each pass, while enforcing the shared mailbox daily cap. Change the interval with `OUTREACH_WORKER_INTERVAL_MS` (minimum 60 seconds).
+
+### Hostinger cron or n8n
+
+Call:
+
+```http
+POST /api/automation/run
+Authorization: Bearer YOUR_OUTREACH_CRON_SECRET
+Content-Type: application/json
+
+{}
+```
+
+The endpoint re-checks campaign status, contact permission, suppression, prior replies, send window and daily limit immediately before sending.
 
 ## Hostinger webhook
-Expose the app over HTTPS and create a Hostinger webhook for `message.received` pointing to:
+
+Create a Hostinger `message.received` webhook pointing to:
+
 ```text
 https://YOUR-DOMAIN/api/webhooks/hostinger
 ```
-Store the generated webhook secret in `HOSTINGER_WEBHOOK_SECRET`. Hostinger sends the secret as a Bearer token on webhook deliveries.
 
-## Connect OpenAI / OpenClaw
-### REST
-Give the agent `APP_URL` and `AGENT_API_KEY`. Start with:
-- `POST /api/agent/command`
-- `GET /api/leads`
-- `POST /api/mail/send`
+Save its Bearer secret as `HOSTINGER_WEBHOOK_SECRET`. The handler records each provider event once, matches the sender to a contact, stops pending follow-ups, updates lead status and sends the Telegram alert.
 
-### MCP
-Run:
+## CSV format
+
+```csv
+first_name,last_name,email,company,role,website,location
+Jane,Doe,jane@example.com,Doe Realty,Agent,https://example.com,Miami
+```
+
+Common alternatives such as `name`, `full_name`, `email_address`, `business`, `job_title`, `url`, `city` and `country` are recognized.
+
+## Verification
+
 ```bash
-npm run mcp
-```
-Example client config:
-```json
-{
-  "mcpServers": {
-    "leadpilot": {
-      "command": "npm",
-      "args": ["run", "mcp"],
-      "cwd": "/path/to/leadpilot-ai",
-      "env": {
-        "APP_URL": "http://localhost:3000",
-        "AGENT_API_KEY": "your-key"
-      }
-    }
-  }
-}
+npm test
+npm run build
 ```
 
-## Production hardening checklist
-1. Add Auth.js/Better Auth and workspace membership authorization.
-2. Encrypt provider tokens at rest; do not keep mailbox tokens as plain DB columns.
-3. Replace demo lead endpoints with Prisma-backed CRUD.
-4. Add a worker process for BullMQ follow-ups and re-check policy immediately before every send.
-5. Validate Hostinger webhook event schema against your live payload and persist raw event IDs for idempotency.
-6. Add jurisdiction-aware outreach rules, unsubscribe links, physical-business identity/footer where required, suppression and bounce processing.
-7. Add source adapters that use official/publicly permitted data sources and respect site terms/robots/access controls.
-8. Add per-mailbox warm-up/rate limits and deliverability monitoring.
-9. Add audit logs for every agent tool call and outbound send.
-10. Add explicit approval gates before enabling full Autopilot mode.
+## Compliance
 
-## Architecture
-```text
-AI / OpenClaw / OpenAI
-        |
-     REST + MCP
-        |
- Policy & Permission Layer
-   /        |        \
-Research    CRM      Mail
-                    |
-              Hostinger API
-                    |
-         message.received webhook
-                    |
-             AI reply classifier
-                    |
-              Telegram alert
-```
-
-## Important
-This project is designed for legitimate B2B prospecting. Do not use it to bypass access controls, harvest private/sensitive information, ignore opt-outs, or send deceptive/spam messages. Public availability of a contact address does not by itself remove applicable marketing/privacy obligations.
-
-## Dashboard-managed local secrets
-Open **Settings** or **Integrations** in the dashboard to configure Hostinger Mail, OpenAI, Telegram and Agent API credentials. Values are persisted on the server in `data/settings.enc.json` and encrypted with AES-256-GCM using a locally generated key in `data/.settings-key`. Secret values are never returned to the dashboard after saving. Runtime integrations read the local setting first and fall back to matching environment variables when no local value exists.
-
-Back up both files together if you need to migrate the installation. Do not commit either file; both are ignored by Git.
+Use only legitimate customer or permission-based prospect lists. Do not upload purchased, scraped, private or Fiverr customer addresses for off-platform promotion without appropriate consent. Every generated plain-text message includes a reply-based opt-out instruction; providers and jurisdictions may require additional identity, postal-address or one-click unsubscribe controls.
